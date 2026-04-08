@@ -1,0 +1,290 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mô phỏng Giao thức TB-PQ-AKE</title>
+<style>
+  :root { --fg:#0b1526; --muted:#5b6b82; --bg:#f7f9fc; --panel:#ffffff; --accent:#2b74ff; --ok:#1a9b50; --bad:#d33; --warn:#f39c12; }
+  *{box-sizing:border-box} body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.45 system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial}
+  header{padding:18px 20px;border-bottom:1px solid #e6ecf5;background:#fff;position:sticky;top:0;z-index:2}
+  h1{margin:0;font-size:20px}
+  main{padding:20px;max-width:1100px;margin:0 auto}
+  .grid{display:grid;gap:16px;grid-template-columns:1fr; }
+  @media(min-width:900px){ .grid{ grid-template-columns: 1fr 1fr; } }
+  section{background:var(--panel);border:1px solid #e6ecf5;border-radius:12px;padding:16px}
+  h2{margin:6px 0 10px 0;font-size:18px; color: var(--accent)}
+  p{margin:8px 0;color:var(--muted)}
+  code{background:#eef3ff;border-radius:8px;padding:2px 6px}
+  button{cursor:pointer;border:1px solid #d6def0;background:#fff;border-radius:10px;padding:10px 14px;font-weight:600; transition: 0.2s;}
+  button:disabled{opacity: 0.5; cursor: not-allowed;}
+  button.primary{background:var(--accent);color:#fff;border-color:var(--accent)}
+  button.primary:hover:not(:disabled){background:#1d63e3}
+  button.danger{background:var(--bad);color:#fff;border-color:var(--bad)}
+  .row{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:10px 0}
+  .kv{display:grid;grid-template-columns:150px 1fr;gap:8px;align-items:start;margin:10px 0; word-break: break-all;}
+  .mono{font-family:ui-monospace,SFMono-Regular,Consolas,Monaco,monospace;font-size:13px}
+  .pill{display:inline-block;padding:4px 8px;border-radius:999px;background:#eef4ff;border:1px solid #dfe8ff;color:#2b3b6a;font-weight:600}
+  .ok{color:var(--ok); font-weight:bold;} .bad{color:var(--bad); font-weight:bold;}
+  .small{font-size:13px;color:var(--muted)}
+  .tbl{overflow:auto;border:1px solid #e9eef7;border-radius:10px}
+  table{border-collapse:collapse;width:100%}
+  th,td{padding:6px 8px;border-bottom:1px dashed #e9eef7;text-align:left;font-size:13px; word-break: break-all;}
+  tr:last-child td{border-bottom:none}
+  .tag{font-size:12px;padding:2px 6px;border-radius:6px;background:#f1f5ff;border:1px solid #e1e8ff;margin-left:6px; font-weight: bold;}
+  .note{background:#fff7d6;border:1px solid #ffe6a2;padding:8px 10px;border-radius:10px;color:#7b5d00}
+  .foot{margin-top:14px;font-size:12px;color:var(--muted); text-align: center;}
+</style>
+</head>
+<body>
+<header>
+  <h1>Mô phỏng Giao thức TB-PQ-AKE — <span class="pill">Interactive Protocol Demo</span></h1>
+</header>
+<main>
+  <div class="grid">
+    <section>
+      <h2>Giai đoạn 1: Offline Setup (Trusted Center)</h2>
+      <p>TC tạo Khóa chủ (Master Secret) $S$ và nạp các Token dài hạn $T_A$ cho các thiết bị IoT trước khi ngắt mạng (offline).</p>
+      <div class="row">
+        <button id="btnSetup" class="primary">1. Khởi tạo Hệ thống</button>
+        <span id="stSetup" class="small"></span>
+      </div>
+      <div class="kv mono">
+        <div>Khóa chủ (S)</div><div id="v_S" class="tag" style="background:#ffe6a2; color:#000;">Chưa tạo</div>
+        <div>Alice ID ($ID_A$)</div><div id="v_IDA"></div>
+        <div>Bob ID ($ID_B$)</div><div id="v_IDB"></div>
+        <div>Public Key ($pk_A$)</div><div id="v_pkA"></div>
+        <div>Token dài hạn ($T_A$)</div><div id="v_TA" class="tag" style="background:#d1f2eb; color:#000;">H(S || pk_A || ID_A)</div>
+      </div>
+    </section>
+
+    <section>
+      <h2>Giai đoạn 2: Initiation (Alice &rarr; Bob)</h2>
+      <p>Alice tạo nonce $r_A$ và tính toán Token ngắn hạn $t_A$ để chứng minh danh tính mà không cần gửi Khóa chủ.</p>
+      <div class="row">
+        <button id="btnInit" class="primary" disabled>2. Gửi Message 1</button>
+        <span id="stInit" class="small"></span>
+      </div>
+      <div class="kv mono">
+        <div>Nonce ($r_A$)</div><div id="v_rA"></div>
+        <div>Token ngắn hạn ($t_A$)</div><div id="v_tA" class="tag" style="background:#d1f2eb; color:#000;">H(T_A || r_A)</div>
+        <div>Message 1 ($M_1$)</div><div id="v_M1"></div>
+      </div>
+    </section>
+
+    <section>
+      <h2>Giai đoạn 3: Encapsulation (Bob &rarr; Alice)</h2>
+      <p>Bob kiểm tra $t_A$ trước (Chống DoS). Nếu hợp lệ, chạy ML-KEM Encapsulation và sinh mã MAC để phản hồi.</p>
+      <div class="row">
+        <button id="btnResp" class="primary" disabled>3. Xác thực & Phản hồi</button>
+        <label style="font-size: 13px; color: var(--bad); cursor:pointer;">
+          <input type="checkbox" id="chkDos"> Kẻ tấn công sửa t_A (DoS Attack)
+        </label>
+      </div>
+      <div class="kv mono">
+        <div>Token kiểm tra ($t'_A$)</div><div id="v_tpA"></div>
+        <div>Trạng thái Token</div><div id="v_TokenStatus"></div>
+        <div>Ciphertext ($ct$)</div><div id="v_ct"></div>
+        <div>Shared Secret ($ss$)</div><div id="v_ssB"></div>
+        <div>Khóa phiên ($K$)</div><div id="v_KB" class="tag" style="background:#fdebd0; color:#000;">KDF(ss || S || r_A || r_B)</div>
+        <div>Mã xác thực ($MAC_B$)</div><div id="v_MACB"></div>
+        <div>Message 2 ($M_2$)</div><div id="v_M2"></div>
+      </div>
+    </section>
+
+    <section>
+      <h2>Giai đoạn 4: Verification (Alice)</h2>
+      <p>Alice decapsulate để lấy $ss$, tự tính lại Khóa phiên $K$ và kiểm tra mã MAC của Bob.</p>
+      <div class="row">
+        <button id="btnVerify" class="primary" disabled>4. Decapsulate & Xác minh</button>
+        <span id="stVerify" class="small"></span>
+      </div>
+      <div class="kv mono">
+        <div>Khôi phục $ss$</div><div id="v_ssA"></div>
+        <div>Khóa phiên tính lại ($K'$)</div><div id="v_KA" class="tag" style="background:#fdebd0; color:#000;">KDF(ss || S || r_A || r_B)</div>
+        <div>Tính lại $MAC'_B$</div><div id="v_MACpB"></div>
+        <div>Kết quả cuối cùng</div><div id="v_FinalResult"></div>
+      </div>
+    </section>
+  </div>
+
+  <section style="margin-top: 16px;">
+    <h2>Bảng Transcript Giao dịch (Logs)</h2>
+    <div class="tbl" id="tableDump"></div>
+    <div class="foot">Lưu ý: Các thuật toán KEM.Encaps và KEM.Decaps được mô phỏng ngẫu nhiên chuỗi byte để đảm bảo Web nhẹ. Hashing (SHA-256) và MAC (HMAC) được chạy thực tế bằng Web Crypto API.</div>
+  </section>
+</main>
+
+<script>
+// ---------- Utils: Crypto API ----------
+const toHex = (buf)=>[...new Uint8Array(buf)].map(b=>b.toString(16).padStart(2,'0')).join('');
+function randHex(bytes) {
+  const arr = new Uint8Array(bytes);
+  window.crypto.getRandomValues(arr);
+  return toHex(arr);
+}
+
+async function sha256(str) {
+  const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(str));
+  return toHex(buf);
+}
+
+async function hmacSha256(keyHex, msgStr) {
+  const keyBytes = new Uint8Array(keyHex.match(/.{1,2}/g).map(byte => parseInt(byte, 16)));
+  const key = await crypto.subtle.importKey("raw", keyBytes, {name: "HMAC", hash: "SHA-256"}, false, ["sign"]);
+  const sig = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(msgStr));
+  return toHex(sig);
+}
+
+// ---------- UI Utils ----------
+function set(id, html) { document.getElementById(id).innerHTML = html; }
+function enable(id, isEnable) { document.getElementById(id).disabled = !isEnable; }
+
+let tableRows = [];
+function updateTable() {
+  const esc = (s)=>String(s).replaceAll("&","&amp;").replaceAll("<","&lt;");
+  let html = "<table><thead><tr><th style='width: 200px;'>Bước</th><th>Giá trị dữ liệu</th></tr></thead><tbody>";
+  for(const [k,v] of tableRows){
+    html += `<tr><td><b>${esc(k)}</b></td><td class="mono">${esc(v)}</td></tr>`;
+  }
+  html += "</tbody></table>";
+  document.getElementById("tableDump").innerHTML = html;
+}
+
+// ---------- Global State ----------
+const state = {
+  S: "", IDA: "Device_Alice_A1", IDB: "Device_Bob_B2",
+  pkA: "", skA: "", TA: "",
+  rA: "", tA: "",
+  rB: "", ct: "", ss: "", K: "", MAC_B: ""
+};
+
+// ---------- Protocol Flows ----------
+async function runSetup() {
+  state.S = randHex(16);
+  state.pkA = "MLKEM_PK_" + randHex(12);
+  state.skA = "MLKEM_SK_" + randHex(12);
+  
+  // T_A = H(S || pk_A || ID_A)
+  state.TA = await sha256(state.S + state.pkA + state.IDA);
+
+  set("v_S", state.S);
+  set("v_IDA", state.IDA);
+  set("v_IDB", state.IDB);
+  set("v_pkA", state.pkA);
+  set("v_TA", state.TA);
+  set("stSetup", "✔ Đã tạo thông số Offline.");
+
+  tableRows = [
+    ["[Offline] Master Secret (S)", state.S],
+    ["[Offline] Alice pk_A", state.pkA],
+    ["[Offline] Alice Long Token T_A", state.TA]
+  ];
+  updateTable();
+
+  enable("btnInit", true);
+  enable("btnResp", false);
+  enable("btnVerify", false);
+}
+
+async function runInit() {
+  state.rA = randHex(16);
+  // t_A = H(T_A || r_A)
+  state.tA = await sha256(state.TA + state.rA);
+
+  set("v_rA", state.rA);
+  set("v_tA", state.tA);
+  set("v_M1", `[ ${state.IDA}, ${state.pkA}, <br>${state.rA}, <br>${state.tA} ]`);
+  set("stInit", "✔ Đã gửi M1 sang Bob.");
+
+  tableRows.push(["[M1] Nonce r_A", state.rA]);
+  tableRows.push(["[M1] Short Token t_A", state.tA]);
+  updateTable();
+
+  enable("btnResp", true);
+  enable("btnVerify", false);
+}
+
+async function runResp() {
+  const isDos = document.getElementById("chkDos").checked;
+  const received_tA = isDos ? "TAMPED_TOKEN_BAD_BAD_BAD" : state.tA;
+
+  // Bob recomputes t'_A = H( H(S || pk_A || ID_A) || r_A )
+  const expected_TA = await sha256(state.S + state.pkA + state.IDA);
+  const tpA = await sha256(expected_TA + state.rA);
+  
+  set("v_tpA", tpA);
+
+  if (tpA !== received_tA) {
+    set("v_TokenStatus", "<span class='bad'>✖ LỖI TOKEN! Đã chặn luồng (Chống DoS). KEM KHÔNG ĐƯỢC CHẠY.</span>");
+    set("v_ct", "-"); set("v_ssB", "-"); set("v_KB", "-"); set("v_MACB", "-"); set("v_M2", "-");
+    enable("btnVerify", false);
+    tableRows.push(["[Bob] Kiểm tra Token", "THẤT BẠI. Kết nối bị từ chối."]);
+    updateTable();
+    return;
+  }
+
+  set("v_TokenStatus", "<span class='ok'>✔ Hợp lệ. Chạy KEM...</span>");
+
+  // KEM Encapsulation (Mock)
+  state.rB = randHex(16);
+  state.ss = randHex(32);
+  state.ct = "MLKEM_CT_" + randHex(16);
+
+  // K = KDF(ss || S || rA || rB) -> Dùng SHA-256 mô phỏng HKDF
+  state.K = await sha256(state.ss + state.S + state.rA + state.rB);
+
+  // MAC_B = MAC_K(ct || ID_B || rB || tA)
+  const macInput = state.ct + state.IDB + state.rB + state.tA;
+  state.MAC_B = await hmacSha256(state.K, macInput);
+
+  set("v_ct", state.ct);
+  set("v_ssB", state.ss);
+  set("v_KB", state.K);
+  set("v_MACB", state.MAC_B);
+  set("v_M2", `[ ${state.IDB}, <br>${state.ct}, <br>${state.rB}, <br>${state.MAC_B} ]`);
+
+  tableRows.push(["[M2] Ciphertext ct", state.ct]);
+  tableRows.push(["[Bob] Shared Secret (ss)", state.ss]);
+  tableRows.push(["[Bob] Session Key (K)", state.K]);
+  tableRows.push(["[M2] MAC_B", state.MAC_B]);
+  updateTable();
+
+  enable("btnVerify", true);
+}
+
+async function runVerify() {
+  // Alice KEM Decapsulation (Mock perfectly recovers ss)
+  set("v_ssA", state.ss);
+
+  // Recompute K
+  const Kp = await sha256(state.ss + state.S + state.rA + state.rB);
+  set("v_KA", Kp);
+
+  // Recompute MAC'_B
+  const macInput = state.ct + state.IDB + state.rB + state.tA;
+  const MAC_prime = await hmacSha256(Kp, macInput);
+  set("v_MACpB", MAC_prime);
+
+  if (MAC_prime === state.MAC_B) {
+    set("v_FinalResult", "<span class='ok' style='font-size: 16px;'>✔ XÁC THỰC THÀNH CÔNG! <br>Khóa phiên đã thiết lập.</span>");
+    tableRows.push(["[Alice] Xác thực MAC", "THÀNH CÔNG. Giao thức hoàn tất."]);
+  } else {
+    set("v_FinalResult", "<span class='bad'>✖ THẤT BẠI. Có kẻ tấn công sửa đổi M2.</span>");
+  }
+  updateTable();
+}
+
+// ---------- Wire up Events ----------
+document.getElementById('btnSetup').onclick = runSetup;
+document.getElementById('btnInit').onclick = runInit;
+document.getElementById('btnResp').onclick = runResp;
+document.getElementById('btnVerify').onclick = runVerify;
+
+// Init empty states
+set("v_IDA", state.IDA);
+set("v_IDB", state.IDB);
+
+</script>
+</body>
+</html>

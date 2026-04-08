@@ -1,0 +1,270 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TB-PQ-AKE Protocol Interactive Demo</title>
+    <style>
+        :root {
+            --bg-color: #f4f7f6;
+            --primary: #2c3e50;
+            --accent: #3498db;
+            --success: #27ae60;
+            --danger: #e74c3c;
+            --text: #333;
+            --panel-bg: #fff;
+        }
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text);
+            line-height: 1.6;
+            margin: 0;
+            padding: 20px;
+        }
+        .container {
+            max-width: 1000px;
+            margin: auto;
+            background: var(--panel-bg);
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        }
+        h1, h2 { color: var(--primary); text-align: center; }
+        .note { text-align: center; font-style: italic; color: #7f8c8d; margin-bottom: 30px; }
+        .step {
+            border-left: 4px solid var(--accent);
+            padding: 15px 20px;
+            margin-bottom: 25px;
+            background: #fdfdfd;
+            border-radius: 0 8px 8px 0;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+        }
+        .step h3 { margin-top: 0; color: var(--accent); }
+        button {
+            background-color: var(--accent);
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            font-size: 16px;
+            border-radius: 5px;
+            cursor: pointer;
+            transition: background 0.3s;
+        }
+        button:hover { background-color: #2980b9; }
+        button:disabled { background-color: #bdc3c7; cursor: not-allowed; }
+        .console {
+            background: #2c3e50;
+            color: #ecf0f1;
+            padding: 15px;
+            border-radius: 5px;
+            font-family: 'Courier New', Courier, monospace;
+            font-size: 14px;
+            overflow-x: auto;
+            margin-top: 15px;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+        }
+        .highlight { color: #f1c40f; font-weight: bold; }
+        .success-text { color: #2ecc71; font-weight: bold; }
+        .danger-text { color: #e74c3c; font-weight: bold; }
+        .controls { margin-top: 10px; display: flex; align-items: center; gap: 15px; }
+        label { font-weight: bold; cursor: pointer; color: var(--danger); }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h1>TB-PQ-AKE Protocol Execution</h1>
+    <div class="note">Functional demonstration of the Token-Based Post-Quantum Authenticated Key Exchange. <br> Cryptographic hashes and MACs are live (Web Crypto API). ML-KEM operations are simulated.</div>
+
+    <div class="step" id="step0">
+        <h3>Phase 1: Offline System Setup (Trusted Center)</h3>
+        <p>The Trusted Center generates the Master Secret Key (S), KEM keypairs, and Long-term Tokens.</p>
+        <button id="btn-setup" onclick="runSetup()">1. Initialize Ecosystem</button>
+        <div id="out-setup" class="console" style="display: none;"></div>
+    </div>
+
+    <div class="step" id="step1">
+        <h3>Phase 2: Initiation (Alice &rarr; Bob)</h3>
+        <p>Alice generates an ephemeral nonce and creates a Short-term Token to prove her identity.</p>
+        <button id="btn-init" onclick="runInitiation()" disabled>2. Send M1 (Initiation)</button>
+        <div id="out-init" class="console" style="display: none;"></div>
+    </div>
+
+    <div class="step" id="step2">
+        <h3>Phase 3: Encapsulation & Response (Bob &rarr; Alice)</h3>
+        <p>Bob verifies the token first (Authenticate First, Compute Later). If valid, he runs KEM encapsulation.</p>
+        <div class="controls">
+            <button id="btn-resp" onclick="runResponse()" disabled>3. Verify & Respond (M2)</button>
+            <label><input type="checkbox" id="chk-dos"> Simulate DoS Attack (Tamper Alice's Token)</label>
+        </div>
+        <div id="out-resp" class="console" style="display: none;"></div>
+    </div>
+
+    <div class="step" id="step3">
+        <h3>Phase 4: Decapsulation & Verification (Alice)</h3>
+        <p>Alice decapsulates the shared secret and verifies Bob's MAC to achieve mutual authentication.</p>
+        <button id="btn-verify" onclick="runVerification()" disabled>4. Decapsulate & Verify</button>
+        <div id="out-verify" class="console" style="display: none;"></div>
+    </div>
+</div>
+
+<script>
+    // --- CRYPTOGRAPHIC UTILITIES (Web Crypto API) ---
+    async function sha256(message) {
+        const msgBuffer = new TextEncoder().encode(message);
+        const hashBuffer = await crypto.subtle.digest('SHA-256', msgBuffer);
+        return buf2hex(hashBuffer);
+    }
+
+    async function hmacSha256(keyHex, message) {
+        const keyBuffer = new Uint8Array(keyHex.match(/.{1,2}/g).map(byte => parseInt(byte, 16)));
+        const msgBuffer = new TextEncoder().encode(message);
+        const cryptoKey = await crypto.subtle.importKey(
+            'raw', keyBuffer, { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']
+        );
+        const signature = await crypto.subtle.sign('HMAC', cryptoKey, msgBuffer);
+        return buf2hex(signature);
+    }
+
+    function generateRandomHex(bytes = 16) {
+        const array = new Uint8Array(bytes);
+        window.crypto.getRandomValues(array);
+        return buf2hex(array);
+    }
+
+    function buf2hex(buffer) {
+        return Array.prototype.map.call(new Uint8Array(buffer), x => ('00' + x.toString(16)).slice(-2)).join('');
+    }
+
+    // --- GLOBAL STATE ---
+    const state = {
+        IDA: "Device_Alice_001", IDB: "Device_Bob_002",
+        S: "", pkA: "", skA: "", TA: "",
+        rA: "", tA: "",
+        rB: "", ct: "", ss: "", K: "", MAC_B: ""
+    };
+
+    function logToConsole(elementId, text, append = false) {
+        const el = document.getElementById(elementId);
+        el.style.display = "block";
+        if (append) el.innerHTML += text + "\n";
+        else el.innerHTML = text + "\n";
+    }
+
+    // --- PROTOCOL EXECUTION ---
+
+    // 1. Setup
+    async function runSetup() {
+        state.S = generateRandomHex(32); // Master Secret
+        state.pkA = "MLKEM_PK_" + generateRandomHex(16); // Mock PK
+        state.skA = "MLKEM_SK_" + generateRandomHex(16); // Mock SK
+        
+        // TA = H(S || pkA || IDA)
+        state.TA = await sha256(state.S + state.pkA + state.IDA);
+
+        let log = `<span class="highlight">--- Generating Offline Credentials ---</span>\n`;
+        log += `Master Secret (S) : ${state.S}\n`;
+        log += `Alice ML-KEM PK   : ${state.pkA}\n`;
+        log += `Alice ID          : ${state.IDA}\n`;
+        log += `Alice Long Token  : <span class="success-text">${state.TA}</span>\n`;
+        
+        logToConsole("out-setup", log);
+        document.getElementById("btn-init").disabled = false;
+    }
+
+    // 2. Initiation
+    async function runInitiation() {
+        state.rA = generateRandomHex(16);
+        
+        // tA = H(TA || rA)
+        state.tA = await sha256(state.TA + state.rA);
+
+        let log = `<span class="highlight">--- Alice Initiates Session ---</span>\n`;
+        log += `Generated Nonce (rA) : ${state.rA}\n`;
+        log += `Computed Short Token (tA) : <span class="success-text">${state.tA}</span>\n`;
+        log += `\n>> Transmitting M1 = { IDA, pkA, rA, tA } to Bob...`;
+
+        logToConsole("out-init", log);
+        document.getElementById("btn-resp").disabled = false;
+    }
+
+    // 3. Response
+    async function runResponse() {
+        const isDos = document.getElementById("chk-dos").checked;
+        const received_tA = isDos ? "INVALID_TOKEN_999" : state.tA;
+
+        let log = `<span class="highlight">--- Bob Receives M1 ---</span>\n`;
+        log += `1. Reconstructing Alice's Token...\n`;
+        
+        // Bob independently computes t'_A = H(H(S || pkA || IDA) || rA)
+        const expected_TA = await sha256(state.S + state.pkA + state.IDA);
+        const t_prime_A = await sha256(expected_TA + state.rA);
+
+        log += `   Bob's Computed t'_A : ${t_prime_A}\n`;
+        log += `   Received tA         : ${received_tA}\n`;
+
+        if (t_prime_A !== received_tA) {
+            log += `\n<span class="danger-text">>>> ABORT: Token Mismatch! DoS/Spoofing Attack Detected.</span>\n`;
+            log += `<span class="danger-text">>>> Connection Dropped before heavy KEM operations.</span>`;
+            logToConsole("out-resp", log);
+            document.getElementById("btn-verify").disabled = true;
+            return; // STOP
+        }
+
+        log += `\n<span class="success-text">>>> Token Verified! Alice Authenticated. Proceeding to KEM...</span>\n\n`;
+        
+        // Simulate KEM Encapsulation
+        state.rB = generateRandomHex(16);
+        state.ss = generateRandomHex(32); // Mock shared secret
+        state.ct = "MLKEM_CT_" + generateRandomHex(16); // Mock ciphertext
+        
+        log += `2. Running KEM.Encaps(pkA) -> (ct, ss)\n`;
+        log += `   Ciphertext (ct) : ${state.ct}\n`;
+        
+        // K = KDF(ss || S || rA || rB) -> We use SHA-256 to simulate KDF
+        state.K = await sha256(state.ss + state.S + state.rA + state.rB);
+        log += `3. Deriving Session Key (K) : ${state.K}\n`;
+
+        // MAC_B = MAC_K(ct || ID_B || rB || tA)
+        const macInput = state.ct + state.IDB + state.rB + state.tA;
+        state.MAC_B = await hmacSha256(state.K, macInput);
+        
+        log += `4. Computing MAC_B : <span class="highlight">${state.MAC_B}</span>\n`;
+        log += `\n>> Transmitting M2 = { IDB, ct, rB, MAC_B } to Alice...`;
+
+        logToConsole("out-resp", log);
+        document.getElementById("btn-verify").disabled = false;
+    }
+
+    // 4. Verification
+    async function runVerification() {
+        let log = `<span class="highlight">--- Alice Receives M2 ---</span>\n`;
+        
+        log += `1. Running KEM.Decaps(skA, ct) -> ss\n`;
+        // In simulation, Alice perfectly recovers 'ss'
+        
+        // Alice derives K
+        const K_prime = await sha256(state.ss + state.S + state.rA + state.rB);
+        log += `2. Deriving Session Key (K') : ${K_prime}\n`;
+
+        // Alice computes MAC'_B
+        const macInput = state.ct + state.IDB + state.rB + state.tA;
+        const MAC_prime_B = await hmacSha256(K_prime, macInput);
+        
+        log += `3. Computing Expected MAC'_B : <span class="highlight">${MAC_prime_B}</span>\n`;
+        log += `   Received MAC_B            : <span class="highlight">${state.MAC_B}</span>\n\n`;
+
+        if (MAC_prime_B === state.MAC_B) {
+            log += `<span class="success-text" style="font-size: 1.2em;">>>> MUTUAL AUTHENTICATION SUCCESSFUL! <<<</span>\n`;
+            log += `Secure Session Established using Post-Quantum Key: ${state.K.substring(0,16)}...`;
+        } else {
+            log += `<span class="danger-text">>>> ABORT: MAC Verification Failed!</span>`;
+        }
+
+        logToConsole("out-verify", log);
+    }
+</script>
+</body>
+</html>
